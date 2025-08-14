@@ -311,49 +311,7 @@ export default function SevenFieldsTable() {
 
   if (rows.length === 0) {
     return (
-      <div className="w-full">
-        <div className="mb-2 flex items-center justify-end gap-2">
-          <Link
-            href="/saves"
-            className="rounded-md border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
-          >
-            データ一覧
-          </Link>
-          <button
-            onClick={handleClearAll}
-            className="rounded-md bg-rose-600 px-3 py-1.5 text-white hover:opacity-90"
-          >
-            読込データ全削除
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const payload = {
-                  raw: JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"),
-                  rows,
-                };
-                const res = await fetch("/api/save", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payload),
-                });
-                if (!res.ok) throw new Error("保存に失敗しました");
-                // 保存後、一覧と保存元データをクリア
-                localStorage.removeItem(STORAGE_KEY);
-                localStorage.removeItem(WORKING_ROWS_KEY);
-                setRows([]);
-                window.dispatchEvent(new Event("uploaded-json-changed"));
-                showToast("保存しました。一覧をクリアしました。", "success");
-              } catch (e) {
-                showToast((e as Error).message, "error");
-              }
-            }}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-white hover:opacity-90"
-          >
-            データベースに保存
-          </button>
-
-        </div>
+      <div className="w-full max-w-6xl mx-auto">
         <p className="opacity-70">JSONを読み込むとここに表示されます。</p>
       </div>
     );

@@ -113,7 +113,7 @@ export default function PngLoader() {
                   setFileIds(ids);
                   try { localStorage.setItem("dify_file_ids", JSON.stringify(ids)); } catch {}
                   // アップロード完了のタイミングで分析開始トースト（自動消滅なし）
-                  const analyzingId = showToast("Difyで分析中...", "info", { durationMs: 0 });
+                  const analyzingId = showToast("Difyで分析中...", "info", { durationMs: 0, blink: true });
                   // 画像file_idsとJSON/rowsを使ってDifyワークフローを即実行
                   try {
                     const payload = {
