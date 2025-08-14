@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "./Toast";
@@ -201,6 +201,8 @@ export default function SevenFieldsTable() {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const masterRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -307,6 +309,21 @@ export default function SevenFieldsTable() {
 
   const columns = useMemo(() => [...COLUMNS] as string[], []);
 
+  // 一括チェックの indeterminate 表示
+  useEffect(() => {
+    if (!masterRef.current) return;
+    const size = selected.size;
+    masterRef.current.indeterminate = size > 0 && size < rows.length;
+  }, [selected, rows.length]);
+
+  // 入れ替わり時の初期化（必要に応じて）
+  useEffect(() => {
+    // 新しいデータ読み込み時は選択をリセット
+    setSelected(new Set());
+  }, [rows]);
+
+  // 一括選択UIは削除済みのため、関数は不要
+
   // 使っていないヘルパーは削除（不要警告の解消）
 
   if (rows.length === 0) {
@@ -319,7 +336,7 @@ export default function SevenFieldsTable() {
 
   return (
     <div className="w-full max-w-6xl mx-auto">
-      <div className="mb-2 flex items-center justify-end gap-2">
+      <div className="mb-2 flex items-center justify-end gap-3">
         <Link
           href="/saves"
           className="rounded-md border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
@@ -335,9 +352,14 @@ export default function SevenFieldsTable() {
         <button
           onClick={async () => {
             try {
+              const selectedRows = rows.filter((_, i) => selected.has(i));
+              if (selectedRows.length === 0) {
+                showToast("選択された行がありません。チェックを入れてください。", "info");
+                return;
+              }
               const payload = {
                 raw: JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"),
-                rows,
+                rows: selectedRows,
               };
               const res = await fetch("/api/save", {
                 method: "POST",
@@ -345,13 +367,16 @@ export default function SevenFieldsTable() {
                 body: JSON.stringify(payload),
               });
               if (!res.ok) throw new Error("保存に失敗しました");
-              localStorage.removeItem(STORAGE_KEY);
-              localStorage.removeItem(WORKING_ROWS_KEY);
-              setRows([]);
-              window.dispatchEvent(new Event("uploaded-json-changed"));
-              alert("保存しました。一覧をクリアしました。");
+              // 保存成功: 選択されていない行は残す
+              const remaining = rows.filter((_, i) => !selected.has(i));
+              setRows(remaining);
+              setSelected(new Set());
+              try {
+                localStorage.setItem(WORKING_ROWS_KEY, JSON.stringify(remaining));
+              } catch {}
+              showToast(`選択した ${selectedRows.length} 行を保存しました。未選択の行は残しています。`, "success");
             } catch (e) {
-              alert((e as Error).message);
+              showToast((e as Error).message, "error");
             }
           }}
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-white hover:opacity-90"
@@ -370,6 +395,7 @@ export default function SevenFieldsTable() {
               </th>
             ))}
               <th className="px-3 py-2 text-left font-semibold">操作</th>
+              <th className="px-3 py-2 text-left font-semibold">選択</th>
           </tr>
         </thead>
         <tbody>
@@ -386,6 +412,20 @@ export default function SevenFieldsTable() {
                     <button onClick={() => handleEditOpen(idx)} className="rounded-md bg-sky-600 px-3 py-1 text-white hover:opacity-90">編集</button>
                     <button onClick={() => handleDeleteRow(idx)} className="rounded-md bg-rose-600 px-3 py-1 text-white hover:opacity-90">削除</button>
                   </div>
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(idx)}
+                    onChange={(e) => {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(idx); else next.delete(idx);
+                        return next;
+                      });
+                    }}
+                    className="h-4 w-4"
+                  />
                 </td>
             </tr>
           ))}
