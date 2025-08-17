@@ -8,7 +8,7 @@ export default function Home() {
     <main className="flex min-h-screen flex-col items-start justify-start gap-8 p-8 pt-12">
       <div className="relative w-full max-w-6xl mx-auto">
         <h1 className="w-full text-center text-3xl sm:text-4xl font-extrabold tracking-tight text-sky-600">
-          仕入管理システム
+          仕入管理システム Ver1.0
         </h1>
         <Link
           href="/saves"
