@@ -12,49 +12,6 @@ function isRecord(u: unknown): u is AnyRecord {
   return typeof u === "object" && u !== null && !Array.isArray(u);
 }
 
-function findOrder(raw: unknown, selected: AnyRecord | null): AnyRecord | null {
-  if (!selected) return null;
-  const idKeys = ["受注番号", "納入先番号", "出荷日"]; // 簡易的な同定用
-
-  const matches = (row: AnyRecord): boolean => {
-    return idKeys.every((k) => selected[k] ? row[k] === selected[k] : true);
-  };
-
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      if (isRecord(item)) {
-        if (matches(item)) return item;
-        if (isRecord(item.text) && matches(item.text as AnyRecord)) return item.text as AnyRecord;
-        // text が文字列(JSON)の可能性
-        if (typeof (item as any).text === "string") {
-          try {
-            const parsed = JSON.parse((item as any).text as string);
-            if (Array.isArray(parsed)) {
-              for (const p of parsed) if (isRecord(p) && matches(p)) return p;
-            } else if (isRecord(parsed) && matches(parsed)) {
-              return parsed;
-            }
-          } catch {}
-        }
-      }
-    }
-  } else if (isRecord(raw)) {
-    if (matches(raw)) return raw;
-    if (isRecord(raw.text) && matches(raw.text as AnyRecord)) return raw.text as AnyRecord;
-    // text が文字列(JSON)の可能性
-    if (typeof raw.text === "string") {
-      try {
-        const parsed = JSON.parse(raw.text as string);
-        if (Array.isArray(parsed)) {
-          for (const p of parsed) if (isRecord(p) && matches(p)) return p;
-        } else if (isRecord(parsed) && matches(parsed)) {
-          return parsed;
-        }
-      } catch {}
-    }
-  }
-  return null;
-}
 
 function toDetails(order: AnyRecord): AnyRecord[] {
   // 形式A: 明細キーがある（後方互換）
@@ -90,8 +47,8 @@ function toDetails(order: AnyRecord): AnyRecord[] {
 
 export default function DetailPage() {
   const params = useSearchParams();
-  const [selected, setSelected] = useState<AnyRecord | null>(null);
   const [raw, setRaw] = useState<unknown>(null);
+  const [rowIndex, setRowIndex] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [form, setForm] = useState<{ 部品番号: string; 部品名: string; 数量: string; 売上単価: string }>({
@@ -102,10 +59,9 @@ export default function DetailPage() {
   });
 
   useEffect(() => {
-    try {
-      const row = localStorage.getItem("selected-row");
-      setSelected(row ? (JSON.parse(row) as AnyRecord) : null);
-    } catch {}
+    const indexParam = params.get("i");
+    setRowIndex(indexParam ? parseInt(indexParam, 10) : null);
+    
     try {
       const text = localStorage.getItem(STORAGE_KEY);
       setRaw(text ? JSON.parse(text) : null);
@@ -113,19 +69,25 @@ export default function DetailPage() {
   }, [params]);
 
   const details = useMemo(() => {
-    const order = findOrder(raw, selected);
-    if (!order) return [];
-    return toDetails(order).map((d) => ({
+    if (rowIndex === null || !raw || !Array.isArray(raw)) return [];
+    if (rowIndex < 0 || rowIndex >= raw.length) return [];
+    
+    const order = raw[rowIndex] as AnyRecord;
+    if (!isRecord(order)) return [];
+    
+    const parts = toDetails(order);
+    
+    return parts.map((d: AnyRecord) => ({
       部品番号: d["部品番号"],
       部品名: d["部品名"],
       数量: d["数量"],
       売上単価: d["売上単価"],
       売上金額: calcAmount(d["数量"], d["売上単価"]),
     }));
-  }, [raw, selected]);
+  }, [raw, rowIndex]);
 
   const totalAmount = useMemo(() => {
-    return details.reduce((sum, d) => {
+    return details.reduce((sum: number, d: AnyRecord) => {
       const n = Number(d["売上金額"]);
       return Number.isFinite(n) ? sum + n : sum;
     }, 0);
@@ -138,14 +100,8 @@ export default function DetailPage() {
     } catch {}
   };
 
-  const matches = (row: AnyRecord, sel: AnyRecord): boolean => {
-    const idKeys = ["受注番号", "納入先番号", "出荷日"];
-    return idKeys.every((k) => (sel[k] ? row[k] === sel[k] : true));
-  };
-
-  const withCloned = (value: unknown): any => {
+  const withCloned = (value: unknown): unknown => {
     try {
-      // @ts-ignore structuredClone is supported in modern browsers
       return structuredClone(value);
     } catch {
       return JSON.parse(JSON.stringify(value));
@@ -153,36 +109,19 @@ export default function DetailPage() {
   };
 
   const modifyTargetOrder = (modifier: (order: AnyRecord) => void) => {
-    if (!selected) return;
-    const cloned = withCloned(raw);
-    if (Array.isArray(cloned)) {
-      for (const item of cloned) {
-        if (isRecord(item) && matches(item, selected)) {
-          modifier(item);
-          setLocalRaw(cloned);
-          return;
-        }
-        if (isRecord(item) && isRecord(item.text) && matches(item.text as AnyRecord, selected)) {
-          modifier(item.text as AnyRecord);
-          setLocalRaw(cloned);
-          return;
-        }
-      }
-    } else if (isRecord(cloned)) {
-      if (matches(cloned, selected)) {
-        modifier(cloned);
-        setLocalRaw(cloned);
-        return;
-      }
-      if (isRecord(cloned.text) && matches(cloned.text as AnyRecord, selected)) {
-        modifier(cloned.text as AnyRecord);
-        setLocalRaw(cloned);
-        return;
-      }
-    }
+    if (rowIndex === null || !raw || !Array.isArray(raw)) return;
+    if (rowIndex < 0 || rowIndex >= raw.length) return;
+    
+    const cloned = withCloned(raw) as unknown[];
+    const order = cloned[rowIndex] as AnyRecord;
+    if (!isRecord(order)) return;
+    
+    modifier(order);
+    setLocalRaw(cloned);
   };
 
   const handleDelete = (index: number) => {
+    if (rowIndex === null) return;
     modifyTargetOrder((order) => {
       const legacy = order["明細"];
       if (Array.isArray(legacy)) {
@@ -216,7 +155,7 @@ export default function DetailPage() {
   };
 
   const saveEdit = () => {
-    if (editingIndex === null) return;
+    if (editingIndex === null || rowIndex === null) return;
     const idx = editingIndex;
     
     const calculatedAmount = calcAmount(form.数量, form.売上単価);
@@ -235,7 +174,7 @@ export default function DetailPage() {
         return;
       }
       
-      const keys = ["部品番号", "部品名", "数量", "売上単価"] as const;
+      const keys = ["部品番号", "部品名", "数量", "売上単価", "売上金額"] as const;
       for (const k of keys) {
         if (Array.isArray(order[k])) {
           const arr = order[k] as unknown[];
@@ -286,7 +225,7 @@ export default function DetailPage() {
               </tr>
             </thead>
             <tbody>
-              {details.map((d, i) => (
+              {details.map((d: AnyRecord, i: number) => (
                 <tr key={i} className="even:bg-black/5/50 dark:even:bg-white/5/50">
                   <td className="px-3 py-2">{formatCell(d["部品番号"])}</td>
                   <td className="px-3 py-2">{formatCell(d["部品名"])}</td>
