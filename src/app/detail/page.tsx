@@ -222,7 +222,6 @@ export default function DetailPage() {
   };
 
   const handleDelete = (index: number) => {
-    if (rowIndex === null) return;
     modifyTargetOrder((order) => {
       const legacy = order["明細"];
       if (Array.isArray(legacy)) {
