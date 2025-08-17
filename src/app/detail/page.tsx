@@ -193,7 +193,8 @@ export default function DetailPage() {
         order["明細"] = [] as unknown[];
         return;
       }
-      const keys = ["部品番号", "部品名", "数量", "売上単価"] as const;
+      
+      const keys = ["部品番号", "部品名", "数量", "売上単価", "売上金額"] as const;
       for (const k of keys) {
         if (Array.isArray(order[k])) {
           (order[k] as unknown[]) = (order[k] as unknown[]).filter((_, i) => i !== index);
@@ -217,6 +218,9 @@ export default function DetailPage() {
   const saveEdit = () => {
     if (editingIndex === null) return;
     const idx = editingIndex;
+    
+    const calculatedAmount = calcAmount(form.数量, form.売上単価);
+    
     modifyTargetOrder((order) => {
       const legacy = order["明細"];
       if (Array.isArray(legacy)) {
@@ -226,9 +230,11 @@ export default function DetailPage() {
           target["部品名"] = form.部品名;
           target["数量"] = form.数量;
           target["売上単価"] = form.売上単価;
+          target["売上金額"] = calculatedAmount;
         }
         return;
       }
+      
       const keys = ["部品番号", "部品名", "数量", "売上単価"] as const;
       for (const k of keys) {
         if (Array.isArray(order[k])) {
@@ -236,7 +242,13 @@ export default function DetailPage() {
           arr[idx] = form[k as keyof typeof form] as unknown;
         }
       }
+      
+      if (Array.isArray(order["売上金額"])) {
+        const amountArr = order["売上金額"] as unknown[];
+        amountArr[idx] = calculatedAmount;
+      }
     });
+    
     setIsEditing(false);
     setEditingIndex(null);
   };
