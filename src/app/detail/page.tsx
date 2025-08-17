@@ -12,6 +12,66 @@ function isRecord(u: unknown): u is AnyRecord {
   return typeof u === "object" && u !== null && !Array.isArray(u);
 }
 
+function findOrder(raw: unknown, selected: AnyRecord | null): AnyRecord | null {
+  if (!selected) return null;
+  const idKeys = ["受注番号", "納入先番号", "出荷日"];
+
+  const matches = (row: AnyRecord): boolean => {
+    return idKeys.every((k) => selected[k] ? row[k] === selected[k] : true);
+  };
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (isRecord(item)) {
+        if (matches(item)) return item;
+        if (isRecord(item.text) && matches(item.text as AnyRecord)) return item.text as AnyRecord;
+        if (typeof (item as any).text === "string") {
+          try {
+            const parsed = JSON.parse((item as any).text as string);
+            if (Array.isArray(parsed)) {
+              for (const p of parsed) if (isRecord(p) && matches(p)) return p;
+            } else if (isRecord(parsed) && matches(parsed)) {
+              return parsed;
+            }
+          } catch {}
+        }
+      }
+    }
+  } else if (isRecord(raw)) {
+    if (matches(raw)) return raw;
+    if (isRecord(raw.text) && matches(raw.text as AnyRecord)) return raw.text as AnyRecord;
+    if (typeof raw.text === "string") {
+      try {
+        const parsed = JSON.parse(raw.text as string);
+        if (Array.isArray(parsed)) {
+          for (const p of parsed) if (isRecord(p) && matches(p)) return p;
+        } else if (isRecord(parsed) && matches(parsed)) {
+          return parsed;
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+
+function getPartsForRow(raw: unknown, rowIndex: number | null, selectedRow: AnyRecord | null): AnyRecord | null {
+  if (rowIndex !== null && raw && Array.isArray(raw)) {
+    if (rowIndex >= 0 && rowIndex < raw.length) {
+      const order = raw[rowIndex] as AnyRecord;
+      if (isRecord(order)) {
+        const hasPartsData = Array.isArray(order["部品番号"]) || Array.isArray(order["部品名"]) || 
+                            Array.isArray(order["数量"]) || Array.isArray(order["売上単価"]) ||
+                            Array.isArray(order["明細"]) || isRecord(order["明細"]);
+        if (hasPartsData) {
+          return order;
+        }
+      }
+    }
+  }
+  
+  return findOrder(raw, selectedRow);
+}
+
 
 function toDetails(order: AnyRecord): AnyRecord[] {
   // 形式A: 明細キーがある（後方互換）
@@ -49,6 +109,7 @@ export default function DetailPage() {
   const params = useSearchParams();
   const [raw, setRaw] = useState<unknown>(null);
   const [rowIndex, setRowIndex] = useState<number | null>(null);
+  const [selectedRow, setSelectedRow] = useState<AnyRecord | null>(null);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [form, setForm] = useState<{ 部品番号: string; 部品名: string; 数量: string; 売上単価: string }>({
@@ -63,17 +124,19 @@ export default function DetailPage() {
     setRowIndex(indexParam ? parseInt(indexParam, 10) : null);
     
     try {
+      const row = localStorage.getItem("selected-row");
+      setSelectedRow(row ? (JSON.parse(row) as AnyRecord) : null);
+    } catch {}
+    
+    try {
       const text = localStorage.getItem(STORAGE_KEY);
       setRaw(text ? JSON.parse(text) : null);
     } catch {}
   }, [params]);
 
   const details = useMemo(() => {
-    if (rowIndex === null || !raw || !Array.isArray(raw)) return [];
-    if (rowIndex < 0 || rowIndex >= raw.length) return [];
-    
-    const order = raw[rowIndex] as AnyRecord;
-    if (!isRecord(order)) return [];
+    const order = getPartsForRow(raw, rowIndex, selectedRow);
+    if (!order) return [];
     
     const parts = toDetails(order);
     
@@ -84,7 +147,7 @@ export default function DetailPage() {
       売上単価: d["売上単価"],
       売上金額: calcAmount(d["数量"], d["売上単価"]),
     }));
-  }, [raw, rowIndex]);
+  }, [raw, rowIndex, selectedRow]);
 
   const totalAmount = useMemo(() => {
     return details.reduce((sum: number, d: AnyRecord) => {
@@ -109,15 +172,53 @@ export default function DetailPage() {
   };
 
   const modifyTargetOrder = (modifier: (order: AnyRecord) => void) => {
-    if (rowIndex === null || !raw || !Array.isArray(raw)) return;
-    if (rowIndex < 0 || rowIndex >= raw.length) return;
+    const cloned = withCloned(raw);
     
-    const cloned = withCloned(raw) as unknown[];
-    const order = cloned[rowIndex] as AnyRecord;
-    if (!isRecord(order)) return;
+    if (rowIndex !== null && Array.isArray(cloned) && rowIndex >= 0 && rowIndex < cloned.length) {
+      const order = cloned[rowIndex] as AnyRecord;
+      if (isRecord(order)) {
+        const hasPartsData = Array.isArray(order["部品番号"]) || Array.isArray(order["部品名"]) || 
+                            Array.isArray(order["数量"]) || Array.isArray(order["売上単価"]) ||
+                            Array.isArray(order["明細"]) || isRecord(order["明細"]);
+        if (hasPartsData) {
+          modifier(order);
+          setLocalRaw(cloned);
+          return;
+        }
+      }
+    }
     
-    modifier(order);
-    setLocalRaw(cloned);
+    if (!selectedRow) return;
+    const idKeys = ["受注番号", "納入先番号", "出荷日"];
+    const matches = (row: AnyRecord): boolean => {
+      return idKeys.every((k) => (selectedRow[k] ? row[k] === selectedRow[k] : true));
+    };
+
+    if (Array.isArray(cloned)) {
+      for (const item of cloned) {
+        if (isRecord(item) && matches(item)) {
+          modifier(item);
+          setLocalRaw(cloned);
+          return;
+        }
+        if (isRecord(item) && isRecord(item.text) && matches(item.text as AnyRecord)) {
+          modifier(item.text as AnyRecord);
+          setLocalRaw(cloned);
+          return;
+        }
+      }
+    } else if (isRecord(cloned)) {
+      if (matches(cloned)) {
+        modifier(cloned);
+        setLocalRaw(cloned);
+        return;
+      }
+      if (isRecord(cloned.text) && matches(cloned.text as AnyRecord)) {
+        modifier(cloned.text as AnyRecord);
+        setLocalRaw(cloned);
+        return;
+      }
+    }
   };
 
   const handleDelete = (index: number) => {
@@ -155,7 +256,7 @@ export default function DetailPage() {
   };
 
   const saveEdit = () => {
-    if (editingIndex === null || rowIndex === null) return;
+    if (editingIndex === null) return;
     const idx = editingIndex;
     
     const calculatedAmount = calcAmount(form.数量, form.売上単価);
